@@ -1,0 +1,313 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrgRole {
+  PRESIDENT
+  VICE_PRESIDENT
+  HQ_HEAD
+  CENTER_HEAD
+  STAFF
+}
+
+enum GradeLevel {
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+  LEVEL_4
+}
+
+enum RecordStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum GoalLevel {
+  CORPORATE
+  HQ
+  CENTER
+  PERSONAL
+}
+
+enum NotificationType {
+  APPROVAL_REQUEST
+  APPROVED
+  REJECTED
+  REVOKED
+  MODIFICATION_REQUEST
+  MODIFICATION_APPROVED
+  MODIFICATION_REJECTED
+}
+
+/// 평가 등급 허용 규칙의 피평가자 구분 (본부장 / 센터장 / 직원)
+enum EvaluationTargetRole {
+  HQ_HEAD
+  CENTER_HEAD
+  STAFF
+}
+
+/// 본부·단위 조직 코드 — 한글 표기는 labelKo (User.dept와 동기화할 때 참조)
+model OrgDeptCode {
+  code      String   @id @db.VarChar(64)
+  labelKo   String
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subDepts OrgSubDeptCode[]
+}
+
+/// 센터·팀 등 하위조직 코드 — 반드시 소속 deptCode 보유
+model OrgSubDeptCode {
+  code      String      @id @db.VarChar(64)
+  labelKo   String
+  deptCode  String
+  dept      OrgDeptCode @relation(fields: [deptCode], references: [code], onDelete: Restrict)
+  sortOrder Int         @default(0)
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([deptCode])
+}
+
+/// 직책 표시 코드 — permissionKey가 있으면 기존 OrgRole 권한 로직과 연결, 없으면 표시·통계용 커스텀
+model OrgRoleCode {
+  code          String   @id @db.VarChar(64)
+  labelKo       String
+  permissionKey OrgRole?
+  sortOrder     Int      @default(0)
+  active        Boolean  @default(true)
+  remark        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([permissionKey])
+}
+
+/// 직급 표시 코드 — mapsToGrade가 있으면 기존 GradeLevel(1~4단)과 매핑, 없으면 자유 직급명만
+model OrgGradeCode {
+  code        String       @id @db.VarChar(64)
+  labelKo     String
+  mapsToGrade GradeLevel?
+  sortOrder   Int          @default(0)
+  active      Boolean      @default(true)
+  remark      String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([mapsToGrade])
+}
+
+model User {
+  id             Int                @id @default(autoincrement())
+  /// 기존 행 백필: PostgreSQL이 gen_random_uuid()로 채움 (Prisma @default(uuid())는 기존 행에 적용 안 됨)
+  publicId       String             @unique @default(dbgenerated("(gen_random_uuid())::text"))
+  employeeNo     String             @unique @db.VarChar(10)
+  email          String             @unique
+  passwordHash   String?
+  name           String
+  dept           String
+  subDept        String
+  role           OrgRole
+  gradeLevel     GradeLevel
+  hireDate       DateTime
+  isSystemAdmin  Boolean            @default(false)
+  /// true면 로그인 후 비밀번호 변경 화면으로 유도 (시드·import·관리자 초기화 등)
+  mustChangePassword Boolean        @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  goals                Goal[]
+  kpiMetrics           KpiMetric[]
+  competencies         CompetencyEval[]
+  reviewsGiven         CompetencyEval[]      @relation("Reviewer")
+  reviews              PerformanceReview[]
+  approvedGoals1       Goal[]                @relation("FirstApprover")
+  approvedGoals2       Goal[]                @relation("SecondApprover")
+  approvedGoals3       Goal[]                @relation("ThirdApprover")
+  notifications        Notification[]        @relation("NotificationReceiver")
+  sentNotifications    Notification[]        @relation("NotificationSender")
+  adminAuditLogs       AdminAuditLog[]
+}
+
+model Goal {
+  id               Int          @id @default(autoincrement())
+  title            String
+  detail           String?
+  level            GoalLevel
+  status           RecordStatus @default(DRAFT)
+  ownerId          Int?
+  owner            User?        @relation(fields: [ownerId], references: [id])
+  parentId         Int?
+  parent           Goal?        @relation("GoalParent", fields: [parentId], references: [id])
+  children         Goal[]       @relation("GoalParent")
+  
+  // 다단계 승인 필드
+  firstApproverId  Int?
+  firstApprover    User?        @relation("FirstApprover", fields: [firstApproverId], references: [id])
+  firstApprovedAt  DateTime?
+  
+  secondApproverId Int?
+  secondApprover   User?        @relation("SecondApprover", fields: [secondApproverId], references: [id])
+  secondApprovedAt DateTime?
+  
+  thirdApproverId  Int?
+  thirdApprover    User?        @relation("ThirdApprover", fields: [thirdApproverId], references: [id])
+  thirdApprovedAt  DateTime?
+  
+  rejectedReason   String?
+  
+  // 목표수정 승인 필드
+  modificationStatus  RecordStatus @default(DRAFT)
+  modificationReason  String?
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  metrics          KpiMetric[]
+  notifications    Notification[]
+}
+
+model KpiMetric {
+  id          Int          @id @default(autoincrement())
+  goalId      Int
+  ownerId     Int?
+  title       String
+  name        String?
+  targetValue Float
+  targetUnit  String?
+  actualValue Float?
+  detail      String?
+  weight      Float?
+  category    String?
+  status      RecordStatus @default(DRAFT)
+  gradeS      String?      // S등급 기준 (예: 330 이상)
+  gradeB      String?      // B등급 기준 (예: 270 이상 ~ 300 미만)
+  gradeC      String?      // C등급 기준
+  gradeD      String?      // D등급 기준
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  goal        Goal         @relation(fields: [goalId], references: [id])
+  owner       User?        @relation(fields: [ownerId], references: [id])
+}
+
+model CompetencyEval {
+  id          Int          @id @default(autoincrement())
+  ownerId     Int
+  reviewerId  Int?
+  category    String
+  score       Int
+  comment     String?
+  status      RecordStatus @default(DRAFT)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  owner       User         @relation(fields: [ownerId], references: [id])
+  reviewer    User?        @relation("Reviewer", fields: [reviewerId], references: [id])
+}
+
+model PerformanceReview {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  year        Int
+  performance String
+  competency  String
+  grade       String
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id          Int              @id @default(autoincrement())
+  userId      Int
+  type        NotificationType
+  message     String
+  goalId      Int?
+  fromUserId  Int?
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  
+  user        User             @relation("NotificationReceiver", fields: [userId], references: [id])
+  fromUser    User?            @relation("NotificationSender", fields: [fromUserId], references: [id])
+  goal        Goal?            @relation(fields: [goalId], references: [id])
+  
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+/// 연도·본부·피평가자 역할별 허용 평가 등급 (JSON 문자열 배열: A,B,C,D 및 필요 시 S,E)
+model EvaluationGradeRule {
+  id         Int                  @id @default(autoincrement())
+  year       Int
+  dept       String               @db.VarChar(128)
+  targetRole EvaluationTargetRole
+  grades     Json
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  @@unique([year, dept, targetRole])
+  @@index([year])
+}
+
+/// 직원(정규직) 등급별 배분율(%) — 본부·연도별, JSON 키 A,B,C,D,S,E 합계 ≤ 100
+model EvaluationStaffGradeDistribution {
+  id           Int      @id @default(autoincrement())
+  year         Int
+  dept         String   @db.VarChar(128)
+  percentages  Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([year, dept])
+  @@index([year])
+}
+
+model SystemConfig {
+  id                                Int      @id @default(autoincrement())
+  checkCycle                        String   @default("매월")
+  midCheckEnabled                   Boolean  @default(true)
+  finalCheckEnabled                 Boolean  @default(true)
+  goalModificationApprovalRequired  Boolean  @default(true)
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @updatedAt
+}
+
+/// 관리자 작업 감사 (최소)
+model AdminAuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    Int
+  action     String
+  targetType String?
+  targetId   String?
+  detail     String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor User @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+model PerformanceRecord {
+  id          Int       @id @default(autoincrement())
+  metricId    Int
+  actualValue Float
+  evidence    String?
+  description String?
+  attachments String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([metricId])
+}
