@@ -445,6 +445,84 @@ const inputStyle =
 const savedInputStyle =
   "bg-[var(--secondary)] text-[var(--muted-foreground)] border-[var(--border)]";
 
+
+  const GOAL_UNIT_PRESETS = ["백만원", "%", "점", "건", "종"] as const;
+  const GRADE_UNIT_PRESETS = ["백만원", "%", "점", "건", "종"] as const;
+function GoalUnitSelect({
+  unit,
+  onChange,
+  isEditing,
+  isPerformanceMode,
+  ariaLabel,
+}: {
+  unit: string;
+  onChange: (v: string) => void;
+  isEditing: boolean;
+  isPerformanceMode: boolean;
+  ariaLabel: string;
+}) {
+  const presets = GOAL_UNIT_PRESETS as readonly string[];
+  const isPreset = presets.includes(unit);
+  const [customMode, setCustomMode] = useState(() => !isPreset && unit !== "");
+  useEffect(() => {
+    if (presets.includes(unit)) setCustomMode(false);
+    else if (unit !== "") setCustomMode(true);
+  }, [unit, presets]);
+  const selectValue = isPreset
+    ? unit
+    : customMode || unit !== ""
+      ? "__CUSTOM__"
+      : "";
+  const disabled = !isEditing || isPerformanceMode;
+  const readOnlyClass = !isEditing ? savedInputStyle : "";
+  const performanceClass = isPerformanceMode
+    ? "bg-[var(--secondary)] cursor-not-allowed"
+    : "";
+  return (
+    <div className="flex flex-col gap-1">
+      <select
+        className={`${inputStyle} w-full h-10 text-center text-xs ${readOnlyClass} ${performanceClass}`}
+        value={selectValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "") {
+            setCustomMode(false);
+            onChange("");
+          } else if (v === "__CUSTOM__") {
+            setCustomMode(true);
+            onChange("");
+          } else {
+            setCustomMode(false);
+            onChange(v);
+          }
+        }}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      >
+        <option value="">선택</option>
+        {GOAL_UNIT_PRESETS.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+        <option value="__CUSTOM__">직접입력</option>
+      </select>
+      {customMode && (
+        <input
+          type="text"
+          className={`${inputStyle} w-full h-9 text-center text-xs ${readOnlyClass} ${performanceClass}`}
+          value={unit}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="단위입력"
+          disabled={disabled}
+          aria-label={`${ariaLabel} 직접입력`}
+        />
+      )}
+    </div>
+  );
+}
+
+  
 export default function DashboardPage() {
   const router = useRouter();
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -505,6 +583,14 @@ export default function DashboardPage() {
     gradeDNum: "",
     gradeDOp: "미만" as GradeOp,
   });
+
+  // 목표값 및 등급 설정 모달의 "단위 직접입력" UI 상태
+  const [gradeUnitCustomMode, setGradeUnitCustomMode] = useState(false);
+  const gradeUnitIsPreset = (GRADE_UNIT_PRESETS as readonly string[]).includes(
+    gradeValues.unit
+  );
+  const gradeUnitShouldUseCustom =
+    gradeUnitCustomMode || (gradeValues.unit !== "" && !gradeUnitIsPreset);
   
   // 툴팁 hover 상태
   const [hoveredGoalIndex, setHoveredGoalIndex] = useState<number | null>(null);
@@ -3094,24 +3180,14 @@ export default function DashboardPage() {
                       {/* 단위 */}
                       <td className="px-1 py-2 align-middle">
                         <div className="px-2">
-                          <select
-                            className={`${inputStyle} w-full h-10 text-center text-xs ${
-                              !isEditing ? savedInputStyle : ""
-                            } ${isPerformanceMode ? "bg-[var(--secondary)] cursor-not-allowed" : ""}`}
-                            value={goal.unit}
-                            onChange={(event) =>
-                              updateDraftGoal(index, "unit", event.target.value)
-                            }
-                            aria-label={`${goal.title} 단위`}
-                            disabled={!isEditing || isPerformanceMode}
-                          >
-                            <option value="">선택</option>
-                            <option value="백만원">백만원</option>
-                            <option value="%">%</option>
-                            <option value="점">점</option>
-                            <option value="건">건</option>
-                            <option value="종">종</option>
-                          </select>
+                          <GoalUnitSelect
+                            key={goal.id}
+                            unit={goal.unit}
+                            onChange={(v) => updateDraftGoal(index, "unit", v)}
+                            isEditing={isEditing}
+                            isPerformanceMode={isPerformanceMode}
+                            ariaLabel={`${goal.title} 단위`}
+                          />
                         </div>
                       </td>
                       
@@ -3807,9 +3883,27 @@ export default function DashboardPage() {
                     <option value="%">%</option>
                     <option value="건">건</option>
                     <option value="점">점</option>
-                    <option value="명">명</option>
-                    <option value="개">개</option>
+                    <option value="종">종</option>
+                    <option value="단위입력">직접입력</option>
                   </select>
+                  {gradeUnitShouldUseCustom && (
+                    <input
+                      type="text"
+                      className={`mt-2 w-full border border-[var(--border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${(!isEditing || isPerformanceMode) ? "bg-[var(--secondary)]" : ""}`}
+                      value={gradeValues.unit}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setGradeValues({ ...gradeValues, unit: v });
+                        setGradeUnitCustomMode(
+                          v === "" ||
+                            !((GRADE_UNIT_PRESETS as readonly string[]).includes(v))
+                        );
+                      }}
+                      disabled={!isEditing || isPerformanceMode}
+                      placeholder="단위를 직접 입력"
+                      aria-label="단위(직접입력)"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1.5">S등급</label>
