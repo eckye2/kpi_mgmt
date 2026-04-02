@@ -505,7 +505,7 @@ function GoalUnitSelect({
             {p}
           </option>
         ))}
-        <option value="__CUSTOM__">직접입력</option>
+        
       </select>
       {customMode && (
         <input
