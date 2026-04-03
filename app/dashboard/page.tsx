@@ -505,7 +505,7 @@ function GoalUnitSelect({
             {p}
           </option>
         ))}
-        
+        <option value="__CUSTOM__">직접입력</option>
       </select>
       {customMode && (
         <input
@@ -589,8 +589,10 @@ export default function DashboardPage() {
   const gradeUnitIsPreset = (GRADE_UNIT_PRESETS as readonly string[]).includes(
     gradeValues.unit
   );
+  /** 프리셋이 선택된 경우 추가 입력란 숨김(이전 직접입력 후 프리셋 선택 시 custom 플래그만 true로 남는 버그 방지) */
   const gradeUnitShouldUseCustom =
-    gradeUnitCustomMode || (gradeValues.unit !== "" && !gradeUnitIsPreset);
+    !gradeUnitIsPreset &&
+    (gradeUnitCustomMode || gradeValues.unit !== "");
   
   // 툴팁 hover 상태
   const [hoveredGoalIndex, setHoveredGoalIndex] = useState<number | null>(null);
@@ -3132,9 +3134,19 @@ export default function DashboardPage() {
                             const c = parseRangeGrade(goal.gradeC || "");
                             const d = parseSingleGrade(goal.gradeD || "");
                             setEditingGoalIndex(index);
+                            const rawUnit = goal.unit || "";
+                            const wasLegacyDirect =
+                              rawUnit === "단위입력";
+                            const initialUnit = wasLegacyDirect ? "" : rawUnit;
+                            const presetList = GRADE_UNIT_PRESETS as readonly string[];
+                            setGradeUnitCustomMode(
+                              wasLegacyDirect ||
+                                (initialUnit !== "" &&
+                                  !presetList.includes(initialUnit))
+                            );
                             setGradeValues({
                               target: targetStr,
-                              unit: goal.unit || "",
+                              unit: initialUnit,
                               detail: goal.detail || "",
                               gradeA: targetStr,
                               gradeS: goal.gradeS || "",
@@ -3782,6 +3794,7 @@ export default function DashboardPage() {
                           }
                           setIsGradeModalOpen(false);
                           setEditingGoalIndex(null);
+                          setGradeUnitCustomMode(false);
                           setGradeValues({
                             target: "",
                             unit: "",
@@ -3874,8 +3887,26 @@ export default function DashboardPage() {
                   <label className="block text-xs font-medium mb-1.5">단위</label>
                   <select
                     className={`w-full border border-[var(--border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${(!isEditing || isPerformanceMode) ? "bg-[var(--secondary)]" : ""}`}
-                    value={gradeValues.unit}
-                    onChange={(e) => setGradeValues({ ...gradeValues, unit: e.target.value })}
+                    value={
+                      gradeUnitIsPreset
+                        ? gradeValues.unit
+                        : gradeUnitCustomMode || gradeValues.unit !== ""
+                          ? "__CUSTOM__"
+                          : ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "") {
+                        setGradeUnitCustomMode(false);
+                        setGradeValues({ ...gradeValues, unit: "" });
+                      } else if (v === "__CUSTOM__") {
+                        setGradeUnitCustomMode(true);
+                        setGradeValues({ ...gradeValues, unit: "" });
+                      } else {
+                        setGradeUnitCustomMode(false);
+                        setGradeValues({ ...gradeValues, unit: v });
+                      }
+                    }}
                     disabled={!isEditing || isPerformanceMode}
                   >
                     <option value="">선택</option>
@@ -3884,7 +3915,7 @@ export default function DashboardPage() {
                     <option value="건">건</option>
                     <option value="점">점</option>
                     <option value="종">종</option>
-                    <option value="단위입력">직접입력</option>
+                    <option value="__CUSTOM__">직접입력</option>
                   </select>
                   {gradeUnitShouldUseCustom && (
                     <input
@@ -3900,7 +3931,7 @@ export default function DashboardPage() {
                         );
                       }}
                       disabled={!isEditing || isPerformanceMode}
-                      placeholder="단위를 직접 입력"
+                      placeholder="단위입력"
                       aria-label="단위(직접입력)"
                     />
                   )}
@@ -4058,6 +4089,7 @@ export default function DashboardPage() {
                   onClick={() => {
                     setIsGradeModalOpen(false);
                     setEditingGoalIndex(null);
+                    setGradeUnitCustomMode(false);
                     setGradeValues({
                       target: "",
                       unit: "",
@@ -4144,6 +4176,7 @@ export default function DashboardPage() {
                       }
                       setIsGradeModalOpen(false);
                       setEditingGoalIndex(null);
+                      setGradeUnitCustomMode(false);
                       setGradeValues({
                         target: "",
                         unit: "",
